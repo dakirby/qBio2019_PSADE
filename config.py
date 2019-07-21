@@ -166,6 +166,10 @@ class Configuration(object):
             'sbml_integrator': 'cvode', 'parallel_count': None, 'save_best_data': 0, 'simulation_dir': None,
             'parallelize_models': 1,
 
+            #setting default values for PSADE
+            'temperature_minimum': 10**(-10), 'radius_minimum': 10**(-6), 'population_size': 20, 'tau1': 0.01, 'tau2': 0.1,
+            'number_of_processors': 1,
+
             'mutation_rate': 0.5, 'mutation_factor': 0.5, 'islands': 1, 'migrate_every': 20, 'num_to_migrate': 3,
             'stop_tolerance': 0.002, 'de_strategy': 'rand1',
 
@@ -213,7 +217,9 @@ class Configuration(object):
                                 'crossover_number', 'zeta', 'lambda', 'gamma_prob'},
                         'sim': {'simplex_step', 'simplex_log_step', 'simplex_reflection', 'simplex_expansion',
                                 'simplex_contraction', 'simplex_shrink', 'simplex_max_iterations',
-                                'simplex_stop_tol'}
+                                'simplex_stop_tol'},
+                        #adding new alogrithm "PSADE"
+                        'psade': {'number_of_processors', 'temperature_minimum', 'radius_minimum', 'population_size', 'tau1', 'tau2'}
                         }
         ignored_params = set()
         thisalg = conf_dict['fit_type']
