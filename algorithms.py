@@ -1441,74 +1441,6 @@ def latin_hypercube(nsamples, ndims):
         np.random.shuffle(value_table[:, dim])
     return value_table
 
-
-class ModelCheck(object):
-    """
-    An algorithm that just checks the fit quality for a job with no free parameters.
-
-    Does not subclass Algorithm. To run, instead call run_check() with no Cluster.
-    """
-
-    def __init__(self, config):
-        """
-        Instantiates ModelCheck with a Configuration object.
-        :param config: The fitting configuration
-        :type config: Configuration
-        """
-        self.config = config
-        self.exp_data = self.config.exp_data
-        self.objective = self.config.obj
-        self.bootstrap_number = None
-
-        logger.debug('Creating output directory')
-        if not os.path.isdir(self.config.config['output_dir']):
-            os.mkdir(self.config.config['output_dir'])
-
-        if self.config.config['simulation_dir']:
-            self.sim_dir = self.config.config['simulation_dir'] + '/Simulations'
-        else:
-            self.sim_dir = self.config.config['output_dir'] + '/Simulations'
-
-        # Store a list of all Model objects.
-        self.model_list = copy.deepcopy(list(self.config.models.values()))
-
-    def run_check(self, debug=False):
-        """Main loop for executing the algorithm"""
-
-        print1('Running model checking on the given model(s)')
-
-        empty = PSet([])
-        empty.name = 'check'
-        job = Job(self.model_list, empty, 'check', self.sim_dir, self.config.config['wall_time_sim'], None,
-                  None, dict(), delete_folder=False)
-        result = run_job(job, debug, self.sim_dir)
-
-        if isinstance(result, FailedSimulation):
-            print0('Simulation failed.')
-            return
-
-        result.normalize(self.config.config['normalization'])
-        try:
-            result.postprocess_data(self.config.postprocessing)
-        except Exception:
-            logger.exception('User-defined post-processing script failed')
-            traceback.print_exc()
-            print0('User-defined post-processing script failed. Exiting')
-            return
-
-        result.score = self.objective.evaluate_multiple(result.simdata, self.exp_data, self.config.constraints)
-        if result.score is None:
-            print0('Simulation contained NaN or Inf values. Cannot calculate objective value.')
-            return
-        print0('Objective value is %s' % result.score)
-        if len(self.config.constraints) > 0:
-            counter = ConstraintCounter()
-            fail_count = counter.evaluate_multiple(result.simdata, self.exp_data, self.config.constraints)
-            total = sum([len(cset.constraints) for cset in self.config.constraints])
-            print('Satisfied %i out of %i constraints' % (total-fail_count, total))
-            for cset in self.config.constraints:
-                cset.output_itemized_eval(result.simdata, self.sim_dir)
-
 def exp10(n):
     """
     Raise 10 to the power of a possibly user-defined value, and raise a helpful error if it overflows
@@ -1526,3 +1458,86 @@ def exp10(n):
                          'This may be because you declared a lognormal_var or a logvar, and specified the '
                          'arguments in regular space instead of log10 space.' % n)
     return ans
+
+class PSADEBase(Algorithm):
+
+    def __init__(self, config):
+        super(PSADEBase, self).__init__(config)
+
+        self.population_size = config.config['population_size']
+        self.min_temp = config.config['min_temp']
+        self.min_radius = config.config['min_radius']
+
+        self.individuals = []
+
+    def start_run(self):
+        return NotImplementedError("got_result() not implemented in PSADEBase class")
+
+    def got_result(self, res):
+        return NotImplementedError("got_result() not implemented in PSADEBase class")
+
+
+class PSADE(PSADEBase):
+    """
+    Implements the Parallel Simulated Annealing Differential Evolution (PSADE) algorithm,
+    described in Olenšek et al 2011.
+    """
+    def __init__(self, config):
+        """
+        Initializes algorithm based on the config object.
+
+        """
+        super(PSADE, self).__init__(config)
+
+        self.population_size = config.config['population_size']
+        self.variables = []
+        self.sims_completed = 0
+        self.individuals = []  # List of individuals
+        self.fitnesses = []  # List of same shape, gives fitness of each individual
+
+    def random_latin_hypercube_psets(self, n):
+        """
+        Generates n random PSets with a latin hypercube distribution
+        More specifically, the uniform_var and loguniform_var variables follow the latin hypercube distribution,
+        while lognorm are randomized normally.
+
+        :param n: Number of psets to generate
+        :return:
+        """
+        logger.debug("Generating PSets using Latin hypercube sampling")
+        num_uniform_vars = 0
+        for var in self.variables:
+            if var.type == 'uniform_var' or var.type == 'loguniform_var':
+                num_uniform_vars += 1
+
+        # Generate latin hypercube of dimension = number of uniformly distributed variables.
+        rands = latin_hypercube(n, num_uniform_vars)
+        psets = []
+
+        for row in rands:
+            # Initialize the variables
+            # Convert the 0 to 1 random numbers to the required variable range
+            pset_vars = []
+            rowindex = 0
+            for var in self.variables:
+                if var.type == 'uniform_var':
+                    rescaled_val = var.p1 + row[rowindex]*(var.p2-var.p1)
+                    pset_vars.append(var.set_value(rescaled_val))
+                    rowindex += 1
+                elif var.type == 'loguniform_var':
+                    rescaled_val = exp10(np.log10(var.p1) + row[rowindex]*(np.log10(var.p2)-np.log10(var.p1)))
+                    pset_vars.append(var.set_value(rescaled_val))
+                    rowindex += 1
+                else:
+                    pset_vars.append(var.sample_value())
+            psets.append(PSet(pset_vars))
+        return psets
+
+    def start_run(self):
+        print2('Running Parallel Simulated Annealing Differential Evolution (PSADE) with population size %i' % (self.population_size))
+
+        # Initialize random individuals
+        self.individuals = self.random_latin_hypercube_psets(self.population_size)
+
+    def got_result(self, res):
+        return NotImplementedError("got_result() not yet implemented in PSADE class")
